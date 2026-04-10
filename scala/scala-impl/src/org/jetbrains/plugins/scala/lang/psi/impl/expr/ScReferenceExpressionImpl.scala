@@ -437,6 +437,14 @@ class ScReferenceExpressionImpl(node: ASTNode) extends ScReferenceImpl(node) wit
           case result => return result
         }
         computeType.tryWrapIntoSeqType
+      case ScalaResolveResult(obj: ScEnumSingletonCase, _) =>
+        val singletonType = fromType match {
+          case Some(tp) => ScProjectionType(tp, obj)
+          case _        => ScalaType.designator(obj)
+        }
+        val widened = ScLiteralType.widenEnumSingletonCase(obj)(projectContext)
+        if (this.expectedType().forall(widened.conforms)) widened
+        else singletonType
       case ScalaResolveResult(obj: ScObject, _) =>
         def tail =
           fromType match {

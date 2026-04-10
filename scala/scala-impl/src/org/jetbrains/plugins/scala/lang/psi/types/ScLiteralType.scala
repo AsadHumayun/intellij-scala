@@ -7,8 +7,8 @@ import org.jetbrains.plugins.scala.lang.psi.api.base.ScLiteral
 import org.jetbrains.plugins.scala.lang.psi.api.statements.ScEnumSingletonCase
 import org.jetbrains.plugins.scala.lang.psi.api.statements.params.ScTypeParam
 import org.jetbrains.plugins.scala.lang.psi.api.toplevel.typedef.ScTypeDefinition
-import org.jetbrains.plugins.scala.lang.psi.types.api.designator.ScProjectionType
-import org.jetbrains.plugins.scala.project.ProjectContext
+import org.jetbrains.plugins.scala.lang.psi.types.api.designator.{DesignatorOwner, ScDesignatorType, ScProjectionType}
+import org.jetbrains.plugins.scala.project.{ProjectContext, ProjectPsiElementExt}
 
 final class ScLiteralType private(val value: ScLiteral.Value[_],
                                   val allowWiden: Boolean,
@@ -49,7 +49,15 @@ object ScLiteralType {
   def unapply(literalType: ScLiteralType): Some[(Value[_], Boolean)] =
     Some(literalType.value, literalType.allowWiden)
 
-  def widenRecursive(`type`: ScType)(implicit context: Context): ScType = {
+  def widenEnumSingletonCase(o: ScEnumSingletonCase)(implicit pc: ProjectContext): ScType =
+    if (o.superTypes.length == 1) o.superTypes.head
+    else ScCompoundType(o.superTypes)
+
+  /**
+   * Widen singleton types in inferred val/var/def types (those without explicit type annotations).
+   * TODO: widenCtx and context should be same
+   */
+  def widenRecursive(`type`: ScType, widenCtx: PsiElement)(implicit context: Context): ScType = {
     import api._
     import recursiveUpdate.AfterUpdate.{ProcessSubtypes, ReplaceWith, Stop}
 
@@ -57,11 +65,25 @@ object ScLiteralType {
       _.conforms(Singleton(param.projectContext))
     }
 
+    // In Scala3 also widen `.type` designator singletons
+    // (e.g., `c.type` → `Any` for `val c: Any`).
+    // In Scala 2, `.type` designators are preserved.
+    lazy val widenSingletonDesignators = widenCtx.isInScala3Module
+
     def widenRecursiveInner(`type`: ScType, visited: Set[ParameterizedType]): ScType = `type`.recursiveUpdate {
-      case literalType: ScLiteralType => ReplaceWith(literalType.widen)
-      // Enum values can be seen as having literal types, SCL-21726
+      // Always widen literal types (ignoring allowWiden — that flag is for conformance, not for val inference)
+      case literalType: ScLiteralType => ReplaceWith(literalType.wideType)
+      // Enum singleton cases widen to their parent enum type, SCL-21726
       case ScProjectionType(_, o: ScEnumSingletonCase) =>
-        ReplaceWith(if (o.superTypes.length == 1) o.superTypes.head else ScCompoundType(o.superTypes)(`type`.projectContext))
+        ReplaceWith(widenEnumSingletonCase(o)(`type`.projectContext))
+      case ScDesignatorType(o: ScEnumSingletonCase) =>
+        ReplaceWith(widenEnumSingletonCase(o)(`type`.projectContext))
+      // In Scala 3, widen .type designator singletons (e.g., c.type → Any for val c: Any)
+      case d: DesignatorOwner if widenSingletonDesignators && d.isSingleton =>
+        d.designatorSingletonType match {
+          case Some(tp) => ReplaceWith(tp)
+          case None     => ProcessSubtypes
+        }
       case parameterizedType@ParameterizedType(oldDesignator@designator.ScDesignatorType(definition: ScTypeDefinition), typeArguments) if !visited(parameterizedType) =>
         val newDesignator = widenRecursiveInner(oldDesignator, visited + parameterizedType)
 

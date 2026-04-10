@@ -1511,11 +1511,23 @@ trait ScalaConformance extends api.Conformance with TypeVariableUnification {
 
       r.visitType(rightVisitor)
       if (result == null) {
+        lazy val tpUpperConformsToSingleton = u.typeParameter.upperType.conforms(Singleton)
+
         r match {
-          case lit: ScLiteralType if lit.allowWiden && !u.typeParameter.upperType.conforms(Singleton) =>
+          // Widen literal types during type parameter inference (ignoring allowWiden —
+          // that flag is for conformance, not for type parameter inference).
+          // Only skip widening if the type parameter has a Singleton upper bound.
+          case lit: ScLiteralType if !tpUpperConformsToSingleton =>
             result = conformsInner(l, lit.wideType, visited, constraints, checkWeak)
           case lit: ScLiteralType =>
             result = constraints.withLower(u.typeParameter.typeParamId, lit.blockWiden)
+          // Widen enum singleton case types to their parent enum type
+          case ScProjectionType(_, o: ScEnumSingletonCase) if !tpUpperConformsToSingleton =>
+            val widened = ScLiteralType.widenEnumSingletonCase(o)
+            result = conformsInner(l, widened, visited, constraints, checkWeak)
+          case ScDesignatorType(o: ScEnumSingletonCase) if !tpUpperConformsToSingleton =>
+            val widened = ScLiteralType.widenEnumSingletonCase(o)
+            result = conformsInner(l, widened, visited, constraints, checkWeak)
           case _ =>
             result = constraints.withLower(u.typeParameter.typeParamId, r)
         }

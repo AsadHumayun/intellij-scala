@@ -36,7 +36,7 @@ final class ScVariableDefinitionImpl private[psi] (
 
   override def `type`(): TypeResult = typeElement match {
     case Some(te) => te.`type`()
-    case None => expr.map(_.`type`().map(ScLiteralType.widenRecursive)).
+    case None => expr.map(_.`type`().map(ScLiteralType.widenRecursive(_, this))).
       getOrElse(Failure(ScalaBundle.message("cannot.infer.type.without.an.expression")))
   }
 

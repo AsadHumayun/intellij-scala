@@ -133,4 +133,58 @@ class EnumCaseWideningTest extends TypeInferenceTestBase {
       |}
       |""".stripMargin
   )
+
+  def test_widening_in_generic_call_enum(): Unit = doTest(
+    s"""
+       |enum Color { case Green }
+       |object A {
+       |  val x = ${START}Color.Green$END
+       |}
+       |//Color
+       |""".stripMargin
+  )
+
+  def test_widening_in_generic_call_literal_type(): Unit = doTest(
+    s"""
+       |object A {
+       |  val x: 1 = 1
+       |  val y = x
+       |  val z = ${START}y$END
+       |}
+       |//Int
+       |""".stripMargin
+  )
+
+  def test_SCL23271(): Unit = checkTextHasNoErrors(
+    s"""
+       |object Main {
+       |  enum E {
+       |    case A, B, C
+       |  }
+       |
+       |  object E {
+       |    val all = Set(A) + B + C
+       |  }
+       |
+       |  def main(args: Array[String]): Unit = {
+       |    println(E.all)
+       |  }
+       |}
+       |
+       |""".stripMargin
+  )
 }
+
+//object A {
+//  type X = 1
+//  val x: 1 = 1
+//  val y = x
+//  val z: X = y
+//}
+
+//object B {
+//  type X = 1
+//  def f[T](singleton: T): Some[T] = ()
+//  val x = f(3: 3)
+//  val y: Some[X] = x
+//}
